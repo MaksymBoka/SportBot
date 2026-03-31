@@ -8,12 +8,10 @@ from telegram.ext import (
     MessageHandler, filters, ContextTypes, ConversationHandler
 )
 
-# TOKEN береться з системних змінних — не вписуй його в код!
 TOKEN = os.environ.get("BOT_TOKEN")
 
 logging.basicConfig(level=logging.INFO)
 
-# Стани розмови
 CHOOSING_SPORT, CHOOSING_GOAL, LOGGING_WORKOUT = range(3)
 
 SPORTS = ["Біг", "Тренажерний зал", "Плавання", "Велосипед", "Йога", "Футбол"]
@@ -28,8 +26,6 @@ MOTIVATION = [
     "Ти вже кращий за того, ким був вчора.",
     "Відпочинок — частина прогресу. Але сьогодні — час діяти!",
 ]
-
-# ── База даних ──────────────────────────────────
 
 def init_db():
     conn = sqlite3.connect("sport_bot.db")
@@ -74,29 +70,21 @@ def save_user(user_id, username, sport, goal):
     conn.close()
 
 def log_workout(user_id, description, duration):
+    from datetime import date
     conn = sqlite3.connect("sport_bot.db")
     c = conn.cursor()
-    from datetime import date
     c.execute(
         "INSERT INTO workouts (user_id, date, description, duration) VALUES (?, ?, ?, ?)",
         (user_id, str(date.today()), description, duration)
     )
-    c.execute(
-        "UPDATE users SET total_workouts = total_workouts + 1 WHERE user_id=?",
-        (user_id,)
-    )
+    c.execute("UPDATE users SET total_workouts = total_workouts + 1 WHERE user_id=?", (user_id,))
     conn.commit()
     conn.close()
 
 def get_leaderboard():
     conn = sqlite3.connect("sport_bot.db")
     c = conn.cursor()
-    c.execute("""
-        SELECT username, sport, total_workouts
-        FROM users
-        ORDER BY total_workouts DESC
-        LIMIT 10
-    """)
+    c.execute("SELECT username, sport, total_workouts FROM users ORDER BY total_workouts DESC LIMIT 10")
     rows = c.fetchall()
     conn.close()
     return rows
@@ -106,36 +94,28 @@ def get_my_stats(user_id):
     c = conn.cursor()
     c.execute("SELECT total_workouts, sport, goal FROM users WHERE user_id=?", (user_id,))
     row = c.fetchone()
-    c.execute("""
-        SELECT date, description, duration FROM workouts
-        WHERE user_id=? ORDER BY date DESC LIMIT 5
-    """, (user_id,))
+    c.execute("SELECT date, description, duration FROM workouts WHERE user_id=? ORDER BY date DESC LIMIT 5", (user_id,))
     recent = c.fetchall()
     conn.close()
     return row, recent
-
-# ── Команди ─────────────────────────────────────
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     existing = get_user(user.id)
     if existing:
         await update.message.reply_text(
-            f"З поверненням, {user.first_name}! Ти вже зареєстрований.\n\n"
-            "Що робимо?\n"
+            f"З поверненням, {user.first_name}!\n\n"
             "/workout — записати тренування\n"
             "/stats — моя статистика\n"
             "/leaderboard — рейтинг\n"
             "/plan — мій план\n"
-            "/motivation — заряд мотивації\n"
-            "/settings — змінити вид спорту чи ціль"
+            "/motivation — мотивація\n"
+            "/settings — змінити налаштування"
         )
         return ConversationHandler.END
-
     keyboard = [[InlineKeyboardButton(s, callback_data=f"sport_{s}")] for s in SPORTS]
     await update.message.reply_text(
-        f"Привіт, {user.first_name}! Я твій спортивний помічник.\n\n"
-        "Спочатку — оберемо твій вид спорту:",
+        f"Привіт, {user.first_name}! Я твій спортивний помічник.\n\nОбери вид спорту:",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
     return CHOOSING_SPORT
@@ -145,12 +125,8 @@ async def choose_sport(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     sport = query.data.replace("sport_", "")
     context.user_data["sport"] = sport
-
     keyboard = [[InlineKeyboardButton(g, callback_data=f"goal_{g}")] for g in GOALS]
-    await query.edit_message_text(
-        f"Чудово! Ти обрав: {sport}\n\nТепер — яка твоя ціль?",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    await query.edit_message_text(f"Обрав: {sport}\n\nТепер вибери ціль:", reply_markup=InlineKeyboardMarkup(keyboard))
     return CHOOSING_GOAL
 
 async def choose_goal(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -158,20 +134,11 @@ async def choose_goal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     goal = query.data.replace("goal_", "")
     user = query.from_user
-    sport = context.user_data.get("sport", "Невідомо")
-
+    sport = context.user_data.get("sport", "")
     save_user(user.id, user.first_name, sport, goal)
-
     await query.edit_message_text(
-        f"Відмінно! Твій профіль збережено:\n\n"
-        f"Вид спорту: {sport}\n"
-        f"Ціль: {goal}\n\n"
-        "Тепер доступні команди:\n"
-        "/workout — записати тренування\n"
-        "/stats — моя статистика\n"
-        "/leaderboard — рейтинг\n"
-        "/plan — мій план\n"
-        "/motivation — заряд мотивації"
+        f"Профіль збережено!\n\nСпорт: {sport}\nЦіль: {goal}\n\n"
+        "/workout — записати тренування\n/stats — статистика\n/leaderboard — рейтинг\n/plan — план\n/motivation — мотивація"
     )
     return ConversationHandler.END
 
@@ -180,108 +147,69 @@ async def workout_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Спочатку зареєструйся: /start")
         return ConversationHandler.END
     await update.message.reply_text(
-        "Опиши своє тренування у форматі:\n\n"
-        "<b>Опис | Тривалість у хвилинах</b>\n\n"
-        "Наприклад: <code>Біг у парку | 45</code>",
+        "Опиши тренування у форматі:\n\n<b>Опис | Хвилини</b>\n\nНаприклад: <code>Біг у парку | 45</code>",
         parse_mode="HTML"
     )
     return LOGGING_WORKOUT
 
 async def workout_log(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
+    import random
     try:
-        parts = text.split("|")
+        parts = update.message.text.split("|")
         description = parts[0].strip()
         duration = int(parts[1].strip())
         log_workout(update.effective_user.id, description, duration)
-
-        import random
-        quote = random.choice(MOTIVATION)
-        await update.message.reply_text(
-            f"Тренування записано!\n\n"
-            f"Що зробив: {description}\n"
-            f"Тривалість: {duration} хв\n\n"
-            f"💬 {quote}"
-        )
+        await update.message.reply_text(f"Записано!\n\n{description} — {duration} хв\n\n{random.choice(MOTIVATION)}")
     except Exception:
-        await update.message.reply_text(
-            "Формат невірний. Спробуй так:\n<code>Біг | 30</code>",
-            parse_mode="HTML"
-        )
+        await update.message.reply_text("Невірний формат. Спробуй: <code>Біг | 30</code>", parse_mode="HTML")
     return ConversationHandler.END
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    row, recent = get_my_stats(user_id)
+    row, recent = get_my_stats(update.effective_user.id)
     if not row:
         await update.message.reply_text("Спочатку зареєструйся: /start")
         return
-
     total, sport, goal = row
-    text = (
-        f"Твоя статистика:\n\n"
-        f"Вид спорту: {sport}\n"
-        f"Ціль: {goal}\n"
-        f"Всього тренувань: {total}\n\n"
-    )
+    text = f"Статистика:\n\nСпорт: {sport}\nЦіль: {goal}\nТренувань: {total}\n"
     if recent:
-        text += "Останні тренування:\n"
-        for date, desc, dur in recent:
-            text += f"  {date} — {desc} ({dur} хв)\n"
+        text += "\nОстанні:\n"
+        for d, desc, dur in recent:
+            text += f"  {d} — {desc} ({dur} хв)\n"
     await update.message.reply_text(text)
 
 async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rows = get_leaderboard()
     if not rows:
-        await update.message.reply_text("Ще ніхто не записав тренування. Будь першим!")
+        await update.message.reply_text("Ще ніхто не тренувався. Будь першим!")
         return
-    text = "Рейтинг — топ гравців:\n\n"
-    medals = ["1", "2", "3"]
+    text = "Рейтинг:\n\n"
     for i, (name, sport, count) in enumerate(rows):
-        prefix = medals[i] if i < 3 else f"{i+1}."
-        text += f"{prefix} {name} — {count} трен. ({sport})\n"
+        text += f"{i+1}. {name} — {count} трен. ({sport})\n"
     await update.message.reply_text(text)
 
 async def plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    user = get_user(user_id)
+    user = get_user(update.effective_user.id)
     if not user:
         await update.message.reply_text("Спочатку зареєструйся: /start")
         return
-
-    sport = user[2]
-    goal = user[3]
-
+    sport, goal = user[2], user[3]
     plans = {
-        "Схуднути": "Пн — кардіо 40 хв\nВт — відпочинок\nСр — інтервали 30 хв\nЧт — відпочинок\nПт — кардіо 45 хв\nСб — активна прогулянка\nНд — відпочинок",
-        "Набрати масу": "Пн — груди + трицепс\nВт — спина + біцепс\nСр — відпочинок\nЧт — ноги\nПт — плечі + прес\nСб — кардіо легке\nНд — відпочинок",
-        "Витривалість": "Пн — довга пробіжка\nВт — відпочинок\nСр — темпове тренування\nЧт — відпочинок\nПт — інтервали\nСб — довга дистанція\nНд — відпочинок",
-        "Гнучкість": "Щодня 20-30 хв розтяжки\nПн/Ср/Пт — йога\nВт/Чт — динамічна розтяжка\nСб — пілатес\nНд — відпочинок",
+        "Схуднути": "Пн — кардіо 40 хв\nВт — відпочинок\nСр — інтервали 30 хв\nЧт — відпочинок\nПт — кардіо 45 хв\nСб — прогулянка\nНд — відпочинок",
+        "Набрати масу": "Пн — груди + трицепс\nВт — спина + біцепс\nСр — відпочинок\nЧт — ноги\nПт — плечі + прес\nСб — кардіо\nНд — відпочинок",
+        "Витривалість": "Пн — довга пробіжка\nВт — відпочинок\nСр — темпове\nЧт — відпочинок\nПт — інтервали\nСб — довга дистанція\nНд — відпочинок",
+        "Гнучкість": "Пн/Ср/Пт — йога 30 хв\nВт/Чт — розтяжка\nСб — пілатес\nНд — відпочинок",
         "Загальна форма": "Пн — силове\nВт — кардіо\nСр — відпочинок\nЧт — функціональне\nПт — кардіо + прес\nСб — активний відпочинок\nНд — відпочинок",
     }
-
-    week_plan = plans.get(goal, "Тренуйся 3-4 рази на тиждень рівномірно.")
-    await update.message.reply_text(
-        f"Твій тижневий план:\n\n"
-        f"Вид спорту: {sport}\n"
-        f"Ціль: {goal}\n\n"
-        f"{week_plan}"
-    )
+    await update.message.reply_text(f"Твій план:\n\nСпорт: {sport}\nЦіль: {goal}\n\n{plans.get(goal, 'Тренуйся 3-4 рази на тиждень.')}")
 
 async def motivation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     import random
-    quote = random.choice(MOTIVATION)
-    await update.message.reply_text(f"Твій заряд на сьогодні:\n\n{quote}")
+    await update.message.reply_text(random.choice(MOTIVATION))
 
 async def settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton(s, callback_data=f"sport_{s}")] for s in SPORTS]
-    await update.message.reply_text(
-        "Оберемо новий вид спорту:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    await update.message.reply_text("Обери новий вид спорту:", reply_markup=InlineKeyboardMarkup(keyboard))
     return CHOOSING_SPORT
-
-# ── Щоденне нагадування ──────────────────────────
 
 async def daily_reminder(context: ContextTypes.DEFAULT_TYPE):
     import random
@@ -290,28 +218,19 @@ async def daily_reminder(context: ContextTypes.DEFAULT_TYPE):
     c.execute("SELECT user_id, username FROM users")
     users = c.fetchall()
     conn.close()
-
     quote = random.choice(MOTIVATION)
     for user_id, name in users:
         try:
-            await context.bot.send_message(
-                chat_id=user_id,
-                text=f"Доброго ранку, {name}!\n\n{quote}\n\nЗапиши тренування: /workout"
-            )
+            await context.bot.send_message(chat_id=user_id, text=f"Доброго ранку, {name}!\n\n{quote}\n\n/workout — записати тренування")
         except Exception:
             pass
-
-# ── Запуск ───────────────────────────────────────
 
 def main():
     init_db()
     app = Application.builder().token(TOKEN).build()
 
     conv_handler = ConversationHandler(
-        entry_points=[
-            CommandHandler("start", start),
-            CommandHandler("settings", settings),
-        ],
+        entry_points=[CommandHandler("start", start), CommandHandler("settings", settings)],
         states={
             CHOOSING_SPORT: [CallbackQueryHandler(choose_sport, pattern="^sport_")],
             CHOOSING_GOAL: [CallbackQueryHandler(choose_goal, pattern="^goal_")],
@@ -334,7 +253,6 @@ def main():
     app.add_handler(CommandHandler("plan", plan))
     app.add_handler(CommandHandler("motivation", motivation))
 
-    # Щоденне нагадування о 08:00
     app.job_queue.run_daily(daily_reminder, time=time(hour=8, minute=0))
 
     print("Бот запущено!")
