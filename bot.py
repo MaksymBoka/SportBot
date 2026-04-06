@@ -253,7 +253,7 @@ def main():
     app.add_handler(CommandHandler("plan", plan))
     app.add_handler(CommandHandler("motivation", motivation))
 
-    app.job_queue.run_daily(daily_reminder, time=time(hour=8, minute=0))
+    app.job_queue.run_daily(daily_reminder, time=time(hour=6, minute=0))
 
     print("Бот запущено!")
     app.run_polling()
